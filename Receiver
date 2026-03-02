@@ -1,0 +1,94 @@
+#include <esp_now.h>
+#include <WiFi.h>
+
+// L298N Motor Driver Pins
+#define ENA 14   // PWM - Left Motor Speed
+#define IN1 27   // Left Motor Direction
+#define IN2 26
+#define ENB 12   // PWM - Right Motor Speed
+#define IN3 25   // Right Motor Direction
+#define IN4 33
+
+// PWM Settings
+#define PWM_FREQ     1000
+#define PWM_RES      8
+#define PWM_CH_LEFT  0
+#define PWM_CH_RIGHT 1
+
+typedef struct JoystickData {
+  int x;   // -100 to 100 (steering)
+  int y;   // -100 to 100 (throttle)
+  bool btn;
+} JoystickData;
+
+JoystickData incoming;
+
+void setMotors(int leftSpeed, int rightSpeed) {
+  // Left Motor
+  if (leftSpeed >= 0) {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+  } else {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    leftSpeed = -leftSpeed;
+  }
+
+  // Right Motor
+  if (rightSpeed >= 0) {
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+  } else {
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+    rightSpeed = -rightSpeed;
+  }
+
+  ledcWrite(PWM_CH_LEFT,  map(leftSpeed,  0, 100, 0, 255));
+  ledcWrite(PWM_CH_RIGHT, map(rightSpeed, 0, 100, 0, 255));
+}
+
+void onReceive(const uint8_t *mac, const uint8_t *data, int len) {
+  memcpy(&incoming, data, sizeof(incoming));
+
+  int throttle = incoming.y;  // Forward/back
+  int steer    = incoming.x;  // Left/right
+
+  int leftSpeed  = throttle + steer;
+  int rightSpeed = throttle - steer;
+
+  // Clamp to -100 / 100
+  leftSpeed  = constrain(leftSpeed,  -100, 100);
+  rightSpeed = constrain(rightSpeed, -100, 100);
+
+  // Emergency stop on button press
+  if (incoming.btn) {
+    setMotors(0, 0);
+    return;
+  }
+
+  setMotors(leftSpeed, rightSpeed);
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+
+  ledcSetup(PWM_CH_LEFT,  PWM_FREQ, PWM_RES);
+  ledcSetup(PWM_CH_RIGHT, PWM_FREQ, PWM_RES);
+  ledcAttachPin(ENA, PWM_CH_LEFT);
+  ledcAttachPin(ENB, PWM_CH_RIGHT);
+
+  WiFi.mode(WIFI_STA);
+  esp_now_init();
+  esp_now_register_recv_cb(onReceive);
+
+  Serial.println("Bot ready. MAC: " + WiFi.macAddress());
+}
+
+void loop() {
+  // All logic handled in callback
+  delay(10);
+}
