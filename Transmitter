@@ -1,0 +1,53 @@
+#include <esp_now.h>
+#include <WiFi.h>
+
+// Joystick Pins
+#define JOY_X   34
+#define JOY_Y   35
+#define JOY_BTN 32
+
+// ⚠️ Replace with your BOT's MAC address (printed in bot Serial Monitor)
+uint8_t botMac[] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+typedef struct JoystickData {
+  int x;
+  int y;
+  bool btn;
+} JoystickData;
+
+JoystickData toSend;
+esp_now_peer_info_t peerInfo;
+
+int mapJoystick(int raw) {
+  // Raw ADC ~0-4095, center ~2048
+  int centered = raw - 2048;
+  // Deadzone of ±100
+  if (abs(centered) < 100) return 0;
+  return constrain(map(centered, -2048, 2048, -100, 100), -100, 100);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(JOY_BTN, INPUT_PULLUP);
+
+  WiFi.mode(WIFI_STA);
+  esp_now_init();
+
+  memcpy(peerInfo.peer_addr, botMac, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  esp_now_add_peer(&peerInfo);
+
+  Serial.println("Remote ready.");
+}
+
+void loop() {
+  toSend.x   = mapJoystick(analogRead(JOY_X));
+  toSend.y   = mapJoystick(analogRead(JOY_Y));
+  toSend.btn = !digitalRead(JOY_BTN);  // Active LOW
+
+  esp_now_send(botMac, (uint8_t *)&toSend, sizeof(toSend));
+
+  Serial.printf("X: %d | Y: %d | BTN: %d\n", toSend.x, toSend.y, toSend.btn);
+  delay(20);  // 50Hz send rate
+}
